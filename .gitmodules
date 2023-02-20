@@ -1,0 +1,3 @@
+[submodule "src/ext/scripts"]
+	path = src/ext/scripts
+	url = ../scripts.git
