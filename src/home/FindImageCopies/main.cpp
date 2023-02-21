@@ -11,6 +11,7 @@ namespace {
 
 using File = std::pair<QString, QString>;
 using Files = std::vector<File>;
+using Copies = std::unordered_map<std::string, Files>;
 
 constexpr auto REMOVED = "/removed/";
 
@@ -27,18 +28,12 @@ Files GetFileList(const QString & path)
 	return result;
 }
 
-void Process(const QString & path)
+Copies FindCopies(Files && files)
 {
-	if (QDir(path + REMOVED).exists())
-		throw std::ios_base::failure(QString("%1%2 must not exists").arg(path, REMOVED).toStdString());
-
-	auto files = GetFileList(path);
-	std::cout << std::size(files) << " files found" << std::endl;
-
-	std::unordered_map<std::string, Files> copies;
+	Copies copies;
 	QCryptographicHash hash(QCryptographicHash::Md5);
 
-	for (size_t i = 0, currentPercents = 0, sz = std::size(files); i < sz; ++i)
+	for (size_t i = 0, sz = std::size(files); i < sz; ++i)
 	{
 		const auto filePath = QDir::fromNativeSeparators(files[i].first + QDir::separator() + files[i].second);
 		QFile file(filePath);
@@ -51,11 +46,8 @@ void Process(const QString & path)
 
 		copies[hash.result().toHex().toStdString()].push_back(std::move(files[i]));
 
-		if (const auto percents = (i + 1) * 100 / sz; currentPercents != percents)
-		{
-			std::cout << "Find copies: " << i + 1 << " (" << sz << ")" << std::endl;
-			currentPercents = percents;
-		}
+		if ((i + 1) % 100 == 0)
+			std::cout << "Copies searching: " << i + 1 << " (" << sz << ") - " << (i + 1) * 100 / sz << "%" << std::endl;
 	}
 
 	for (auto it = copies.begin(); it != copies.end(); )
@@ -64,16 +56,17 @@ void Process(const QString & path)
 		else
 			it = copies.erase(it);
 
-	std::cout << copies.size() << " copies found" << std::endl;
+	return copies;
+}
 
-	auto it = copies.begin();
-	for (size_t i = 0, currentPercents = 0, sz = copies.size(); i < sz; ++i, ++it)
+void MoveCopies(const QString & path, Copies && copies)
+{
+	for (auto it = copies.begin(), end = copies.end(); it != end; ++it)
 	{
 		assert(it != copies.end());
 
 		const auto maxPathIt = std::ranges::max_element(it->second, [] (const File & lhs, const File & rhs)
 		{
-			const auto lhsL = lhs.first.length(), rhsL = rhs.first.length();
 			return lhs.first.length() < rhs.first.length();
 		});
 
@@ -81,24 +74,39 @@ void Process(const QString & path)
 		if (maxPathIt != lastPathIt)
 			std::swap(*maxPathIt, *lastPathIt);
 
+		std::cout << it->first << ": " << QString("%1/%2").arg(it->second.back().first, it->second.back().second).toStdString() << std::endl;
 		it->second.pop_back();
 
 		for (const auto & file : it->second)
 		{
-			const QFileInfo dstInfo(path + REMOVED + file.first.mid(path.length()) + QDir::separator() + file.second);
-			const auto dstPath = dstInfo.filePath();
-			if (!QDir(dstInfo.path()).exists())
-				(void)QDir().mkdir(dstInfo.path());
+			const QFileInfo dstInfo(path + REMOVED + file.first.mid(path.length() + 1) + QDir::separator() + file.second);
+			const auto dstDir = dstInfo.path();
+			if (!QDir(dstDir).exists() && !QDir().mkpath(dstDir))
+				throw std::ios_base::failure(QString("Cannot create %1 for %2").arg(dstDir, file.second).toStdString());
 
-			QFile::rename(QDir::fromNativeSeparators(file.first + QDir::separator() + file.second), dstInfo.filePath());
-		}
-
-		if (const auto percents = (i + 1) * 100 / sz; currentPercents != percents)
-		{
-			std::cout << "Remove copies: " << i + 1 << " (" << sz << ")" << std::endl;
-			currentPercents = percents;
+			if (QFile::rename(QDir::fromNativeSeparators(file.first + QDir::separator() + file.second), dstInfo.filePath()))
+				std::cout << QString("%1/%2").arg(file.first, file.second).toStdString() << std::endl;
+			else
+				std::cerr << "Cannot move " << file.second.toStdString() << " from " << file.second.toStdString() << " to " << dstInfo.path().toStdString() << std::endl;
 		}
 	}
+}
+
+void Process(QString path)
+{
+	if (path.back() == '/')
+		path.resize(path.length() - 1);
+
+	if (QDir(path + REMOVED).exists())
+		throw std::ios_base::failure(QString("%1%2 must not exists").arg(path, REMOVED).toStdString());
+
+	auto files = GetFileList(path);
+	std::cout << std::size(files) << " files found" << std::endl;
+
+	auto copies = FindCopies(std::move(files));
+	std::cout << copies.size() << " copies found" << std::endl;
+
+	MoveCopies(path, std::move(copies));
 }
 
 int MainImpl(int argc, wchar_t * argv[])
