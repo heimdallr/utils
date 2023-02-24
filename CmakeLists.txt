@@ -48,6 +48,6 @@ if(WIN32)
 endif()
 
 
-include("src/home/FindImageCopies.cmake")
+include("src/home/FindCopies.cmake")
 
 include("${SCRIPTS_PATH}/cmake/PrepareWorkspace.cmake")
