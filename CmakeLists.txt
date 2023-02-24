@@ -49,5 +49,6 @@ endif()
 
 
 include("src/home/FindCopies.cmake")
+include("src/home/FindInvalidImages.cmake")
 
 include("${SCRIPTS_PATH}/cmake/PrepareWorkspace.cmake")
